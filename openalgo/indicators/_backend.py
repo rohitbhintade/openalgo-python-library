@@ -56,6 +56,29 @@ def wma(data, period):
     return out
 
 
+def hma(data, period):
+    """Hull Moving Average = WMA(2*WMA(n/2) - WMA(n), sqrt(n)).
+
+    The intermediate 2*WMA(n/2)-WMA(n) is finite only from index period-1; the
+    final WMA is run over that valid region only so leading NaNs never poison the
+    rolling backend. First valid output at (period-1)+(sqrt(period)-1).
+    """
+    data = _f(data)
+    period = int(period)
+    if HAVE_RUST:
+        return _rs.hma(data, period)
+    n = data.size
+    out = np.full(n, np.nan)
+    half = period // 2
+    sqrt_p = int(np.sqrt(period)) if period > 0 else 0
+    if period <= 0 or n < period or half == 0 or sqrt_p == 0:
+        return out
+    diff = 2.0 * wma(data, half) - wma(data, period)
+    valid_start = period - 1
+    out[valid_start:] = wma(np.ascontiguousarray(diff[valid_start:]), sqrt_p)
+    return out
+
+
 def ema(data, period):
     data = _f(data)
     period = int(period)

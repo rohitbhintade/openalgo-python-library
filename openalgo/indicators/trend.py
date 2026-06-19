@@ -585,8 +585,7 @@ class HMA(BaseIndicator):
     
     def __init__(self):
         super().__init__("HMA")
-        self._wma = WMA()
-    
+
     def calculate(self, data: Union[np.ndarray, pd.Series, list], period: int) -> Union[np.ndarray, pd.Series]:
         """
         Calculate Hull Moving Average
@@ -605,20 +604,13 @@ class HMA(BaseIndicator):
         """
         validated_data, input_type, index = self.validate_input(data)
         self.validate_period(period, len(validated_data))
-        
-        # Step 1: Calculate WMA(n/2)
-        wma_half = self._wma.calculate(validated_data, period // 2)
-        
-        # Step 2: Calculate WMA(n)
-        wma_full = self._wma.calculate(validated_data, period)
-        
-        # Step 3: Calculate 2 * WMA(n/2) - WMA(n)
-        diff = 2 * wma_half - wma_full
-        
-        # Step 4: Calculate HMA = WMA(diff, sqrt(n))
-        sqrt_period = int(np.sqrt(period))
-        result = self._wma.calculate(diff, sqrt_period)
-        
+
+        # HMA = WMA(2*WMA(n/2) - WMA(n), sqrt(n)). Computed in the Rust core, which
+        # runs the final WMA over the finite region only so the (period-1) leading
+        # NaNs from WMA(n) never poison the rolling accumulators (which would blank
+        # the whole output).
+        result = _backend.hma(validated_data, period)
+
         return self.format_output(result, input_type, index)
 
 

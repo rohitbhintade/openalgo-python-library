@@ -166,6 +166,54 @@ pub fn wma(data: &[f64], period: usize) -> Vec<f64> {
     result
 }
 
+/// Hull Moving Average: HMA = WMA(2*WMA(n/2) - WMA(n), sqrt(n)).
+///
+/// The intermediate `2*WMA(n/2) - WMA(n)` is finite only from index `period-1`
+/// (WMA(n)'s warm-up). The final WMA is run as an inline O(n) rolling pass over
+/// exactly that contiguous valid region, so a NaN never enters the running
+/// accumulators (which, once poisoned, would stay NaN forever and blank the whole
+/// output). First valid output is at `(period-1) + (sqrt(period)-1)`.
+pub fn hma(data: &[f64], period: usize) -> Vec<f64> {
+    let n = data.len();
+    let mut out = nan_vec(n);
+    if period == 0 || n < period {
+        return out;
+    }
+    let half = period / 2;
+    let sqrt_p = (period as f64).sqrt() as usize;
+    if half == 0 || sqrt_p == 0 {
+        return out;
+    }
+    let wh = wma(data, half);
+    let wf = wma(data, period);
+    let valid_start = period - 1; // first index where 2*wh - wf is finite
+    if n - valid_start < sqrt_p {
+        return out;
+    }
+    let diff = |idx: usize| 2.0 * wh[idx] - wf[idx];
+    let weight_sum = (sqrt_p * (sqrt_p + 1) / 2) as f64;
+    let sp = sqrt_p as f64;
+    // Seed the first sqrt_p-wide window over diff[valid_start ..= valid_start+sqrt_p-1].
+    let mut sum = 0.0;
+    let mut wsum = 0.0;
+    for j in 0..sqrt_p {
+        let v = diff(valid_start + j);
+        sum += v;
+        wsum += v * (j + 1) as f64;
+    }
+    let first_out = valid_start + sqrt_p - 1;
+    out[first_out] = wsum / weight_sum;
+    // Slide: wsum += sqrt_p*x_new - sum; sum += x_new - x_leaving (same as `wma`).
+    for i in first_out + 1..n {
+        let v = diff(i);
+        let leaving = diff(i - sqrt_p);
+        wsum = wsum + sp * v - sum;
+        sum = sum + v - leaving;
+        out[i] = wsum / weight_sum;
+    }
+    out
+}
+
 /// SMA-seeded EMA: alpha = 2/(period+1), seed = SMA at index period-1, NaN warm-up.
 /// (Distinct from `ema` which first-value-seeds, and `ema_wilder` which uses 1/period.)
 pub fn ema_sma(data: &[f64], period: usize) -> Vec<f64> {
@@ -2681,6 +2729,36 @@ mod tests {
         assert!(r[3].is_finite());
         // smooth of a linear ramp stays increasing
         assert!(r[9] > r[8]);
+    }
+
+    #[test]
+    fn hma_nan_safe_and_aligned() {
+        let n = 100usize;
+        let d: Vec<f64> = (0..n)
+            .map(|i| i as f64 + 1.0 + (i as f64).sin() * 5.0)
+            .collect();
+        let period = 16usize;
+        let sqrt_p = (period as f64).sqrt() as usize; // 4
+        let r = hma(&d, period);
+        // First valid output at (period-1)+(sqrt_p-1); everything before is NaN.
+        let first = (period - 1) + (sqrt_p - 1);
+        assert!(r[first - 1].is_nan());
+        assert!(r[first].is_finite());
+        // The rolling pass must not get poisoned: the whole valid tail stays finite.
+        assert!(r[first..].iter().all(|x| x.is_finite()));
+
+        // Brute-force reference: full-window WMA over the finite diff region only.
+        let wh = wma(&d, period / 2);
+        let wf = wma(&d, period);
+        let ws = (sqrt_p * (sqrt_p + 1) / 2) as f64;
+        for i in first..n {
+            let mut acc = 0.0;
+            for j in 0..sqrt_p {
+                let idx = i - sqrt_p + 1 + j;
+                acc += (2.0 * wh[idx] - wf[idx]) * (j + 1) as f64;
+            }
+            assert!((r[i] - acc / ws).abs() < 1e-9);
+        }
     }
 
     #[test]

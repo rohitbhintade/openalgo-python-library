@@ -26,6 +26,7 @@ macro_rules! wrap_period {
 
 wrap_period!(sma, oa_core::sma);
 wrap_period!(wma, oa_core::wma);
+wrap_period!(hma, oa_core::hma);
 wrap_period!(rolling_sum, oa_core::rolling_sum);
 wrap_period!(rolling_variance, oa_core::rolling_variance);
 wrap_period!(stdev, oa_core::stdev);
@@ -747,6 +748,7 @@ fn valuewhen<'py>(
 fn _oaindicators(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(sma, m)?)?;
     m.add_function(wrap_pyfunction!(wma, m)?)?;
+    m.add_function(wrap_pyfunction!(hma, m)?)?;
     m.add_function(wrap_pyfunction!(rolling_sum, m)?)?;
     m.add_function(wrap_pyfunction!(rolling_variance, m)?)?;
     m.add_function(wrap_pyfunction!(stdev, m)?)?;
